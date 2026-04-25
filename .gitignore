@@ -1,0 +1,16 @@
+# DeepSeek session cookies (contains auth credentials)
+deepseek_cookies.json
+
+# Export outputs (optional — remove this line if you want to track exports in git)
+DeepSeek_Exports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual environment
+mindforge-env/
