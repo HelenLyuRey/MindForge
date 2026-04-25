@@ -2,6 +2,9 @@
 Playwright subprocess: handles DeepSeek login & cookie/token capture.
 Called from the Jupyter notebook to avoid event loop conflicts.
 
+Uses a persistent Chrome profile so login state survives across runs.
+Google OAuth works because it's a real Chrome profile, not automation-detected.
+
 Usage: python pw_login.py <cookie_file> <login_timeout_sec> <page_timeout_ms>
 Output: prints "RESULT:{json}" to stdout on success.
 """
@@ -17,8 +20,18 @@ COOKIE_FILE = Path(sys.argv[1])
 LOGIN_TIMEOUT = int(sys.argv[2])
 PAGE_TIMEOUT = int(sys.argv[3])
 
+# Persistent browser profile directory (next to cookie file)
+PROFILE_DIR = COOKIE_FILE.parent / ".chrome_profile"
+
+
+def is_on_chat_page(url):
+    """True only when URL is the main chat page, not an auth/login redirect."""
+    auth_paths = ("/sign_in", "/login", "/auth", "/callback", "/oauth", "/sso")
+    return "chat.deepseek.com" in url and all(p not in url for p in auth_paths)
+
 
 def capture_auth_token(page):
+    """Intercept API requests to capture the Authorization bearer token."""
     captured = {}
 
     def on_request(request):
@@ -33,49 +46,8 @@ def capture_auth_token(page):
     return captured.get("token")
 
 
-def validate_and_reuse(pw, cookies):
-    browser = pw.chromium.launch(headless=True)
-    context = browser.new_context()
-    context.add_cookies(cookies)
-    page = context.new_page()
-    try:
-        page.goto(DEEPSEEK_BASE_URL, timeout=PAGE_TIMEOUT)
-        page.wait_for_load_state("networkidle", timeout=15000)
-        url = page.url
-        if "sign_in" in url or "login" in url:
-            page.close()
-            browser.close()
-            return None  # cookies expired
-        token = capture_auth_token(page)
-        page.close()
-        browser.close()
-        return cookies, token
-    except Exception:
-        page.close()
-        browser.close()
-        return None
-
-
-def manual_login(pw):
-    # Use installed Chrome — Google blocks OAuth in Playwright's bundled Chromium
-    browser = pw.chromium.launch(
-        headless=False,
-        channel="chrome",
-    )
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(DEEPSEEK_LOGIN_URL, timeout=PAGE_TIMEOUT)
-    print("WAITING_FOR_LOGIN", flush=True)
-
-    # Auth-related URL fragments to ignore (intermediate redirects)
-    AUTH_PATHS = ("/sign_in", "/login", "/auth", "/callback", "/oauth", "/sso")
-
-    def is_logged_in(url):
-        """True only when URL is the main chat page, not an auth redirect."""
-        return ("chat.deepseek.com" in url
-                and all(p not in url for p in AUTH_PATHS))
-
-    # Poll until URL stabilizes on the chat page for 3 consecutive seconds
+def wait_for_login(page):
+    """Poll until the page URL stabilizes on the chat page for 3 seconds."""
     deadline = _time.time() + LOGIN_TIMEOUT
     stable_since = None
 
@@ -83,43 +55,59 @@ def manual_login(pw):
         try:
             current_url = page.url
         except Exception:
-            break  # browser was closed by user
-        if is_logged_in(current_url):
+            return False  # browser was closed
+        if is_on_chat_page(current_url):
             if stable_since is None:
                 stable_since = _time.time()
             elif _time.time() - stable_since >= 3:
-                # URL has been on the chat page for 3 seconds — login complete
-                break
+                return True
         else:
             stable_since = None
         _time.sleep(0.5)
-    else:
-        browser.close()
-        print(json.dumps({"error": "Login timed out"}))
-        sys.exit(1)
 
-    page.wait_for_load_state("networkidle", timeout=15000)
-    token = capture_auth_token(page)
-    cookies = context.cookies()
-    with open(COOKIE_FILE, "w") as f:
-        json.dump(cookies, f, indent=2)
-    browser.close()
-    return cookies, token
+    return False
 
 
 if __name__ == "__main__":
     with sync_playwright() as pw:
-        saved = None
-        if COOKIE_FILE.exists():
-            with open(COOKIE_FILE) as f:
-                saved = json.load(f)
+        # Use persistent context — this creates a real Chrome profile that
+        # remembers login state, cookies, localStorage across runs.
+        # Google OAuth works because it's indistinguishable from a real user.
+        context = pw.chromium.launch_persistent_context(
+            user_data_dir=str(PROFILE_DIR),
+            headless=False,
+            channel="chrome",
+            accept_downloads=False,
+        )
 
-        result = None
-        if saved:
-            result = validate_and_reuse(pw, saved)
+        page = context.pages[0] if context.pages else context.new_page()
 
-        if result is None:
-            result = manual_login(pw)
+        # Navigate to DeepSeek
+        page.goto(DEEPSEEK_BASE_URL, timeout=PAGE_TIMEOUT)
+        page.wait_for_load_state("networkidle", timeout=15000)
 
-        cookies, token = result
+        # Check if we're already logged in (persistent profile may have session)
+        if is_on_chat_page(page.url):
+            print("SESSION_REUSED", flush=True)
+        else:
+            # Need to log in — navigate to login page
+            page.goto(DEEPSEEK_LOGIN_URL, timeout=PAGE_TIMEOUT)
+            print("WAITING_FOR_LOGIN", flush=True)
+            print("Please log in via Google or any other method.", flush=True)
+
+            if not wait_for_login(page):
+                context.close()
+                print(json.dumps({"error": "Login timed out"}))
+                sys.exit(1)
+
+        # Capture auth token
+        page.wait_for_load_state("networkidle", timeout=15000)
+        token = capture_auth_token(page)
+
+        # Save cookies for the requests.Session in the notebook
+        cookies = context.cookies()
+        with open(COOKIE_FILE, "w") as f:
+            json.dump(cookies, f, indent=2)
+
+        context.close()
         print("RESULT:" + json.dumps({"token": token, "cookie_count": len(cookies)}))
