@@ -57,8 +57,17 @@ def validate_and_reuse(pw, cookies):
 
 
 def manual_login(pw):
-    browser = pw.chromium.launch(headless=False)
-    context = browser.new_context()
+    # Use installed Chrome instead of Playwright's Chromium — Google blocks OAuth in automation browsers
+    browser = pw.chromium.launch(
+        headless=False,
+        channel="chrome",
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+    context = browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    )
+    # Hide webdriver flag so Google doesn't detect automation
+    context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page = context.new_page()
     page.goto(DEEPSEEK_LOGIN_URL, timeout=PAGE_TIMEOUT)
     print("WAITING_FOR_LOGIN", flush=True)
