@@ -55,7 +55,11 @@ def wait_for_login(page):
         try:
             current_url = page.url
         except Exception:
-            return False  # browser was closed
+            # Navigation in progress — just wait and retry, don't give up
+            stable_since = None
+            _time.sleep(0.5)
+            continue
+
         if is_on_chat_page(current_url):
             if stable_since is None:
                 stable_since = _time.time()
