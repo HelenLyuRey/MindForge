@@ -62,8 +62,9 @@ def manual_login(pw):
     page.goto(DEEPSEEK_LOGIN_URL, timeout=PAGE_TIMEOUT)
     print("WAITING_FOR_LOGIN", flush=True)
     try:
+        # Wait until we land back on chat.deepseek.com (not Google OAuth or login page)
         page.wait_for_url(
-            lambda url: "sign_in" not in url and "login" not in url,
+            lambda url: "chat.deepseek.com" in url and "/sign_in" not in url,
             timeout=LOGIN_TIMEOUT * 1000,
         )
         page.wait_for_load_state("networkidle", timeout=15000)
