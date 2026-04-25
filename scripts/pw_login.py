@@ -7,6 +7,7 @@ Output: prints "RESULT:{json}" to stdout on success.
 """
 import json
 import sys
+import time as _time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -61,17 +62,39 @@ def manual_login(pw):
     page = context.new_page()
     page.goto(DEEPSEEK_LOGIN_URL, timeout=PAGE_TIMEOUT)
     print("WAITING_FOR_LOGIN", flush=True)
-    try:
-        # Wait until we land back on chat.deepseek.com (not Google OAuth or login page)
-        page.wait_for_url(
-            lambda url: "chat.deepseek.com" in url and "/sign_in" not in url,
-            timeout=LOGIN_TIMEOUT * 1000,
-        )
-        page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
+
+    # Auth-related URL fragments to ignore (intermediate redirects)
+    AUTH_PATHS = ("/sign_in", "/login", "/auth", "/callback", "/oauth", "/sso")
+
+    def is_logged_in(url):
+        """True only when URL is the main chat page, not an auth redirect."""
+        return ("chat.deepseek.com" in url
+                and all(p not in url for p in AUTH_PATHS))
+
+    # Poll until URL stabilizes on the chat page for 3 consecutive seconds
+    deadline = _time.time() + LOGIN_TIMEOUT
+    stable_since = None
+
+    while _time.time() < deadline:
+        try:
+            current_url = page.url
+        except Exception:
+            break  # browser was closed by user
+        if is_logged_in(current_url):
+            if stable_since is None:
+                stable_since = _time.time()
+            elif _time.time() - stable_since >= 3:
+                # URL has been on the chat page for 3 seconds — login complete
+                break
+        else:
+            stable_since = None
+        _time.sleep(0.5)
+    else:
         browser.close()
         print(json.dumps({"error": "Login timed out"}))
         sys.exit(1)
+
+    page.wait_for_load_state("networkidle", timeout=15000)
     token = capture_auth_token(page)
     cookies = context.cookies()
     with open(COOKIE_FILE, "w") as f:
