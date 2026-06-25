@@ -9,6 +9,7 @@ deepseek_cookies.json
 
 # Export outputs (optional — remove this line if you want to track exports in git)
 DeepSeek_Exports/
+intermediate_markdowns/
 
 # Python
 __pycache__/
