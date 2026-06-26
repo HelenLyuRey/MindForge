@@ -1,6 +1,6 @@
 # MindForge
 
-MindForge exports DeepSeek conversations, generates note titles and summaries, builds a taxonomy, and writes enriched Obsidian-ready Markdown notes.
+MindForge exports DeepSeek conversations, generates note titles and summaries, applies a maintained taxonomy, and writes enriched Obsidian-ready Markdown notes.
 
 The original notebooks are preserved in `notebooks_backlog/`. The active workflow now lives in importable Python modules under `mindforge/` with thin numbered entrypoint scripts at the project root.
 
@@ -11,7 +11,6 @@ Run stages in this order:
 ```bash
 python 01_deepseek_export.py
 python 02_generate_title_summary.py
-python 03_taxonomy_refresh.py
 python 04_note_tagging.py
 ```
 
@@ -23,7 +22,6 @@ If DeepSeek export access is blocked by network or IT policy, do not run `01_dee
 MindForge/
 ├── 01_deepseek_export.py
 ├── 02_generate_title_summary.py
-├── 03_taxonomy_refresh.py
 ├── 04_note_tagging.py
 ├── mindforge/
 │   ├── config.py
@@ -56,9 +54,56 @@ MindForge/
 
 It uses `DEEPSEEK_TOKEN` from `.env`, then tries DeepSeek API calls first and Playwright fallback scripts in `scripts/` if needed.
 
+Run it from the project root:
+
+```bash
+python 01_deepseek_export.py
+```
+
+Useful options:
+
+```bash
+python 01_deepseek_export.py --limit 10
+python 01_deepseek_export.py --quiet
+```
+
+By default, the command prints terminal logs showing where files are written, how many chats were found, and which chats are new, updated, or already up to date. Use `--quiet` if you only want the final JSON summary.
+
+Stage 1 exports a conversation when either:
+
+- It is a new DeepSeek chat that has not been exported before.
+- It is an existing DeepSeek chat that has new follow-up messages or other updates since the last export.
+
+Updated chats are re-exported. If the refreshed chat now writes to a different filename, the previous exported Markdown file is removed.
+
 ### 2. Generate Titles And Summaries
 
 `02_generate_title_summary.py` reads `DeepSeek_Exports/*.md`, generates `generated_title` and `summary`, and writes processed files into `intermediate_markdowns/`.
+
+Run it from the project root after Stage 1:
+
+```bash
+python 02_generate_title_summary.py
+```
+
+Useful options:
+
+```bash
+python 02_generate_title_summary.py --limit 10
+python 02_generate_title_summary.py --overwrite
+python 02_generate_title_summary.py --no-resume
+```
+
+The normal command already processes only new or changed exports. `--overwrite` does not make Stage 2 process more chats; it only controls what happens if a note being written has the same filename as an existing intermediate Markdown file. Without `--overwrite`, Stage 2 avoids filename collisions by creating a numbered filename such as `_2`.
+
+Stage 2 remembers which exported chats have already been turned into intermediate Markdown, so reruns only work on new or changed exports.
+
+Stage 2 generates an intermediate Markdown when either:
+
+- The exported DeepSeek chat has not been turned into an intermediate Markdown file before.
+- The exported DeepSeek chat changed since the last intermediate Markdown was generated.
+
+Updated exports are regenerated. If the refreshed intermediate note now writes to a different filename, the previous intermediate Markdown file is removed.
 
 This stage uses Kimi by default:
 
@@ -79,30 +124,11 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:7b-instruct
 ```
 
-It keeps a JSONL checkpoint at `intermediate_markdowns/_pipeline_results.jsonl` so reruns can skip completed source files.
+The final JSON summary includes `new_sources`, `updated_sources`, and `skipped_unchanged`.
 
-### 3. Refresh Taxonomy
+### 3. Maintain Taxonomy
 
-`03_taxonomy_refresh.py` reads the generated title, original title, and summary from `intermediate_markdowns/*.md`, then writes `taxonomy_state/taxonomy_v1.json`.
-
-The taxonomy stage uses the same shared LLM provider settings. Kimi is the default:
-
-```env
-LLM_PROVIDER=kimi
-KIMI_API_KEY=...
-KIMI_MODEL=kimi-k2.6
-```
-
-You can still use the generic OpenAI-compatible provider if needed:
-
-```env
-LLM_PROVIDER=openai_compatible
-OPENAI_BASE_URL=...
-OPENAI_API_KEY=...
-OPENAI_MODEL=...
-```
-
-Or switch back to local Ollama with `LLM_PROVIDER=ollama`.
+`taxonomy_state/taxonomy_v1.json` is the maintained taxonomy used by note tagging. Update it deliberately when categories need to change.
 
 ### 4. Tag And Enrich Notes
 
@@ -129,9 +155,13 @@ playwright install chromium
 
 ## Incremental Behavior
 
-- Stage 1 skips conversations already listed in `DeepSeek_Exports/conversations_manifest.json`.
-- Stage 2 resumes from `intermediate_markdowns/_pipeline_results.jsonl`.
-- Stage 4 skips notes whose source content hash and taxonomy hash match `DeepSeek_Enriched/enrichment_manifest.json`.
+- Stage 1 exports new DeepSeek chats that have not been saved locally before.
+- Stage 1 re-exports existing DeepSeek chats when they have new follow-up messages or other updates.
+- Stage 1 skips existing DeepSeek chats that are already up to date locally.
+- Stage 2 generates intermediate Markdown for newly exported chats.
+- Stage 2 regenerates intermediate Markdown when an exported chat changed after the previous intermediate file was created.
+- Stage 2 skips exported chats whose intermediate Markdown is already up to date.
+- Stage 4 skips enriched notes that are already up to date with the current source note and taxonomy.
 
 ## Notes
 

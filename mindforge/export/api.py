@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ import requests
 
 DEEPSEEK_BASE_URL = "https://chat.deepseek.com"
 DEEPSEEK_API_BASE = "https://chat.deepseek.com/api/v0"
+logger = logging.getLogger(__name__)
 
 
 def api_request(
@@ -69,11 +71,13 @@ def fetch_conversations_api(
             if seq_id is not None and (last_seq_id is None or seq_id < last_seq_id):
                 last_seq_id = seq_id
 
+            raw_updated_at = item.get("updated_at") or item.get("created_at")
             conversations.append(
                 {
                     "conversation_id": conversation_id,
                     "original_title": item.get("title") or "Untitled",
-                    "date": _parse_deepseek_date(item.get("updated_at") or item.get("created_at")),
+                    "date": _parse_deepseek_date(raw_updated_at),
+                    "updated_at": _normalize_deepseek_timestamp(raw_updated_at),
                     "url": f"{DEEPSEEK_BASE_URL}/a/{conversation_id}",
                 }
             )
@@ -123,12 +127,14 @@ def fetch_all_conversations(
     try:
         conversations = fetch_conversations_api(session, request_delay_sec=request_delay_sec)
         if conversations:
+            logger.info("Fetched %s conversations from DeepSeek API with update timestamps.", len(conversations))
             return conversations
     except PermissionError:
         raise
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.info("DeepSeek API conversation fetch failed; falling back to Playwright: %s", exc)
 
+    logger.info("Fetching conversations with Playwright fallback; update timestamps are unavailable.")
     return fetch_conversations_fallback(
         scripts_dir=scripts_dir,
         cookie_file=cookie_file,
@@ -225,10 +231,29 @@ def fetch_messages(
 
 def _parse_deepseek_date(raw_date: Any) -> str:
     if isinstance(raw_date, (int, float)):
-        return datetime.fromtimestamp(raw_date).strftime("%Y-%m-%d")
+        return _datetime_from_deepseek_timestamp(raw_date).strftime("%Y-%m-%d")
     if isinstance(raw_date, str) and raw_date:
         try:
             return datetime.fromisoformat(raw_date.replace("Z", "+00:00")).strftime("%Y-%m-%d")
         except ValueError:
             return raw_date[:10] if len(raw_date) >= 10 else "unknown-date"
     return "unknown-date"
+
+
+def _normalize_deepseek_timestamp(raw_date: Any) -> str:
+    if isinstance(raw_date, (int, float)):
+        return _datetime_from_deepseek_timestamp(raw_date).isoformat().replace("+00:00", "Z")
+    if isinstance(raw_date, str) and raw_date:
+        try:
+            parsed = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        except ValueError:
+            return raw_date
+    return ""
+
+
+def _datetime_from_deepseek_timestamp(raw_date: int | float) -> datetime:
+    timestamp = raw_date / 1000 if raw_date > 10_000_000_000 else raw_date
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc)

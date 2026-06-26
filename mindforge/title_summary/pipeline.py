@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from mindforge.hashing import stable_hash
 from mindforge.llm.client import llm_call_json
 from mindforge.llm.preflight import provider_preflight_check
 from mindforge.manifests import append_jsonl, read_jsonl
@@ -27,9 +28,12 @@ def ingest_exports(cfg: TitleSummaryConfig) -> list[dict[str, Any]]:
     for path in sorted(cfg.export_dir.glob("*.md")):
         raw = path.read_text(encoding="utf-8", errors="ignore")
         frontmatter, body = extract_frontmatter_and_body(raw)
+        source_modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
         rows.append(
             {
                 "source_file": path.name,
+                "source_hash": stable_hash(raw),
+                "source_modified_at": source_modified_at,
                 "date": frontmatter.get("date", "") or parse_date_from_filename(path.name),
                 "original_title": frontmatter.get("original_title") or frontmatter.get("title") or path.stem,
                 "conversation_id": frontmatter.get("conversation_id", ""),
@@ -127,12 +131,26 @@ def publish_rows(
     for row in rows:
         prefix = f"{row.get('date', '')} " if row.get("date") else ""
         filename = f"{prefix}{slugify_filename(_title_for_filename(row))}.md"
-        path = _dedupe_path(cfg.intermediate_dir / filename, overwrite=overwrite)
+        previous_output_file = str(row.get("_previous_output_file", ""))
+        if previous_output_file == filename:
+            path = cfg.intermediate_dir / filename
+        else:
+            path = _dedupe_path(cfg.intermediate_dir / filename, overwrite=overwrite)
         content = build_frontmatter(
             row,
-            ["date", "original_title", "conversation_id", "url", "generated_title", "summary", "source_file"],
+            [
+                "date",
+                "original_title",
+                "conversation_id",
+                "url",
+                "generated_title",
+                "summary",
+                "source_file",
+                "source_hash",
+            ],
         )
         path.write_text(content + "\n\n" + row["body"].lstrip("\n"), encoding="utf-8")
+        _remove_replaced_output(cfg.intermediate_dir, row, path)
         outputs.append({"source_file": row["source_file"], "output_file": path.name})
     return outputs
 
@@ -150,12 +168,18 @@ def run_pipeline(
     provider_preflight_check(config=cfg.llm)
 
     checkpoint_path = cfg.intermediate_dir / checkpoint_file
-    completed = _read_completed_sources(checkpoint_path) if resume_from_checkpoint else set()
+    completed = _read_completed_records(checkpoint_path) if resume_from_checkpoint else {}
     rows = ingest_exports(cfg)
     if limit is not None:
         rows = rows[:limit]
+    total_sources = len(rows)
+    new_count = sum(1 for row in rows if row["source_file"] not in completed)
+    updated_count = sum(
+        1 for row in rows if row["source_file"] in completed and _needs_processing(row, completed)
+    )
     if completed:
-        rows = [row for row in rows if row["source_file"] not in completed]
+        rows = [_attach_previous_output(row, completed) for row in rows if _needs_processing(row, completed)]
+    skipped_count = total_sources - len(rows)
 
     started = datetime.now(timezone.utc)
     output_count = 0
@@ -176,6 +200,8 @@ def run_pipeline(
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "status": "ok",
                     "source_file": row.get("source_file", ""),
+                    "source_hash": row.get("source_hash", ""),
+                    "source_modified_at": row.get("source_modified_at", ""),
                     "output_file": published[0].get("output_file", ""),
                     "generated_title": transformed[0].get("generated_title", ""),
                     "summary": transformed[0].get("summary", ""),
@@ -190,6 +216,7 @@ def run_pipeline(
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "status": "failed",
                     "source_file": row.get("source_file", ""),
+                    "source_hash": row.get("source_hash", ""),
                     "error": str(exc)[:500],
                 },
             )
@@ -198,6 +225,10 @@ def run_pipeline(
         "started_at": started.isoformat(),
         "ended_at": datetime.now(timezone.utc).isoformat(),
         "input_count": len(rows),
+        "total_sources": total_sources,
+        "new_sources": new_count,
+        "updated_sources": updated_count,
+        "skipped_unchanged": skipped_count,
         "output_count": output_count,
         "failure_count": failure_count,
         "checkpoint_file": str(checkpoint_path),
@@ -205,12 +236,62 @@ def run_pipeline(
     }
 
 
-def _read_completed_sources(checkpoint_path: Path) -> set[str]:
-    return {
-        str(row.get("source_file", ""))
-        for row in read_jsonl(checkpoint_path)
-        if row.get("status") == "ok" and row.get("source_file")
-    }
+def _read_completed_records(checkpoint_path: Path) -> dict[str, dict[str, Any]]:
+    completed: dict[str, dict[str, Any]] = {}
+    for row in read_jsonl(checkpoint_path):
+        source_file = str(row.get("source_file", ""))
+        if row.get("status") == "ok" and source_file:
+            completed[source_file] = row
+    return completed
+
+
+def _needs_processing(row: dict[str, Any], completed: dict[str, dict[str, Any]]) -> bool:
+    previous = completed.get(str(row.get("source_file", "")))
+    if previous is None:
+        return True
+
+    previous_hash = str(previous.get("source_hash", ""))
+    if previous_hash:
+        return previous_hash != row.get("source_hash")
+
+    previous_timestamp = _parse_timestamp(previous.get("timestamp"))
+    source_modified_at = _parse_timestamp(row.get("source_modified_at"))
+    if previous_timestamp and source_modified_at:
+        return source_modified_at > previous_timestamp
+
+    return False
+
+
+def _attach_previous_output(
+    row: dict[str, Any],
+    completed: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    previous = completed.get(str(row.get("source_file", ""))) or {}
+    return {**row, "_previous_output_file": previous.get("output_file", "")}
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _remove_replaced_output(intermediate_dir: Path, row: dict[str, Any], new_path: Path) -> None:
+    previous_output_file = str(row.get("_previous_output_file", ""))
+    if not previous_output_file or previous_output_file == new_path.name:
+        return
+
+    previous_path = intermediate_dir / previous_output_file
+    if previous_path.exists():
+        previous_path.unlink()
 
 
 def _title_for_filename(row: dict[str, Any]) -> str:

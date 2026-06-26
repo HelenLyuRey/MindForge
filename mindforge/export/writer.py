@@ -11,6 +11,7 @@ def generate_markdown(conversation: dict[str, Any], messages: list[dict[str, str
     title = conversation.get("original_title", "Untitled")
     date = conversation.get("date", "unknown-date")
     conversation_id = conversation.get("conversation_id", "")
+    updated_at = conversation.get("updated_at", "")
     url = conversation.get("url", "")
     safe_title = str(title).replace('"', '\\"')
 
@@ -19,6 +20,7 @@ def generate_markdown(conversation: dict[str, Any], messages: list[dict[str, str
         f'date: "{date}"',
         f'original_title: "{safe_title}"',
         f'conversation_id: "{conversation_id}"',
+        f'updated_at: "{updated_at}"',
         f'url: "{url}"',
         "---",
         "",
@@ -50,6 +52,7 @@ def write_exported_conversation(
         "conversation_id": conversation["conversation_id"],
         "original_title": conversation.get("original_title", "Untitled"),
         "date": conversation.get("date", "unknown-date"),
+        "updated_at": conversation.get("updated_at", ""),
         "url": conversation.get("url", ""),
         "file_name": filename,
         "exported_at": datetime.now(timezone.utc).isoformat(),
