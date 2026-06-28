@@ -138,6 +138,12 @@ The final JSON summary includes `new_sources`, `updated_sources`, and `skipped_u
 
 `03_add_label.py` reads `pipeline_outputs/02_intermediate_markdowns/*.md`, matches each note to labels from `taxonomy_state/taxonomy_v1.json`, and writes Obsidian-ready Markdown into `pipeline_outputs/03_final_markdowns/`.
 
+To also save the final notes into an Obsidian vault, set `OBSIDIAN_VAULT_PATH` in `.env`. Stage 3 writes the final Markdown files directly into that folder.
+
+```env
+OBSIDIAN_VAULT_PATH=C:\Users\you\Documents\Obsidian\MyVault
+```
+
 Run it from the project root after Stage 2:
 
 ```bash
@@ -175,10 +181,10 @@ The setup commands above are also included in `run_pipeline.bat`. Before running
 - Stage 2 generates intermediate Markdown for newly exported chats.
 - Stage 2 regenerates intermediate Markdown when an exported chat changed after the previous intermediate file was created.
 - Stage 2 skips exported chats whose intermediate Markdown is already up to date.
-- Stage 3 skips final Markdown files that already exist unless `--force` is used.
+- Stage 3 skips final Markdown files that already exist unless `--force` is used. If `OBSIDIAN_VAULT_PATH` is configured, skipped files are still synced from `pipeline_outputs/03_final_markdowns/` into the Obsidian destination.
 
 ## Notes
 
 - `deepseek_cookies.json` and `.env` may contain private credentials and should not be shared.
 - The notebook backlog is intentionally retained for reference and is not part of the active Python workflow.
-- Raw exports remain in `pipeline_outputs/01_deepseek_export/`; title/summary notes are written to `pipeline_outputs/02_intermediate_markdowns/`; tagged notes are written to `pipeline_outputs/03_final_markdowns/`.
+- Raw exports remain in `pipeline_outputs/01_deepseek_export/`; title/summary notes are written to `pipeline_outputs/02_intermediate_markdowns/`; tagged notes are written to `pipeline_outputs/03_final_markdowns/`. If configured, tagged notes are also copied into the Obsidian vault destination.

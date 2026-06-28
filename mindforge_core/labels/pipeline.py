@@ -130,11 +130,40 @@ def label_record(cfg: LabelConfig, row: dict[str, Any], taxonomy: dict[str, Any]
     }
 
 
-def publish_record(cfg: LabelConfig, row: dict[str, Any], decision: dict[str, Any]) -> Path:
+def publish_record(cfg: LabelConfig, row: dict[str, Any], decision: dict[str, Any]) -> dict[str, Path | None]:
     cfg.final_dir.mkdir(parents=True, exist_ok=True)
+    rendered = render_tagged_markdown(row, decision)
     output_path = cfg.final_dir / row["filename"]
-    output_path.write_text(render_tagged_markdown(row, decision), encoding="utf-8")
-    return output_path
+    output_path.write_text(rendered, encoding="utf-8")
+    return {
+        "output_path": output_path,
+        "obsidian_path": write_obsidian_copy(cfg, row["filename"], rendered),
+    }
+
+
+def write_obsidian_copy(cfg: LabelConfig, filename: str, content: str) -> Path | None:
+    obsidian_dir = get_obsidian_output_dir(cfg)
+    if obsidian_dir is None:
+        return None
+
+    obsidian_path = obsidian_dir / filename
+    obsidian_path.write_text(content, encoding="utf-8")
+    return obsidian_path
+
+
+def sync_existing_to_obsidian(cfg: LabelConfig, output_path: Path) -> Path | None:
+    if cfg.obsidian_vault_path is None:
+        return None
+    return write_obsidian_copy(cfg, output_path.name, output_path.read_text(encoding="utf-8"))
+
+
+def get_obsidian_output_dir(cfg: LabelConfig) -> Path | None:
+    if cfg.obsidian_vault_path is None:
+        return None
+
+    output_dir = cfg.obsidian_vault_path
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def render_tagged_markdown(row: dict[str, Any], decision: dict[str, Any]) -> str:
@@ -171,25 +200,32 @@ def run_pipeline(
     for row in selected:
         output_path = cfg.final_dir / row["filename"]
         if output_path.exists() and not force and not preview:
+            obsidian_path = sync_existing_to_obsidian(cfg, output_path)
             results.append(
                 {
                     "status": "skipped",
                     "source_file": row["filename"],
                     "output_file": str(output_path.relative_to(cfg.project_root)),
+                    "obsidian_output_file": str(obsidian_path) if obsidian_path else None,
                     "reason": "output exists; use --force to rebuild",
                 }
             )
             continue
 
         decision = label_record(cfg, row, taxonomy)
+        published: dict[str, Path | None] = {"output_path": None, "obsidian_path": None}
         if not preview:
-            output_path = publish_record(cfg, row, decision)
+            published = publish_record(cfg, row, decision)
+            output_path = published["output_path"] or output_path
 
         results.append(
             {
                 "status": "preview" if preview else "updated",
                 "source_file": row["filename"],
                 "output_file": None if preview else str(output_path.relative_to(cfg.project_root)),
+                "obsidian_output_file": None
+                if preview or published["obsidian_path"] is None
+                else str(published["obsidian_path"]),
                 "tags": decision["tags"],
                 "confidence": decision["confidence"],
                 "reason": decision["reason"],
