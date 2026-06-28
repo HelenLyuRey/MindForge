@@ -45,18 +45,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-call :run "Setup: upgrade pip" python -m pip install --upgrade pip || exit /b !ERRORLEVEL!
-call :run "Setup: install Python dependencies" python -m pip install -r requirements.txt || exit /b !ERRORLEVEL!
-call :run "Setup: install Playwright Chromium" python -m playwright install chromium || exit /b !ERRORLEVEL!
+call :run "Setup: install Python dependencies" "python -m pip install -r requirements.txt" || exit /b !ERRORLEVEL!
+call :run "Setup: install Playwright Chromium" "python -m playwright install chromium" || exit /b !ERRORLEVEL!
 
 echo.
 echo ========================================
 echo Running MindForge stages
 echo ========================================
 
-call :run "Stage 01: DeepSeek export" python 01_deepseek_export.py || exit /b !ERRORLEVEL!
-call :run "Stage 02: generate titles and summaries" python 02_generate_title_summary.py || exit /b !ERRORLEVEL!
-call :run "Stage 03: add taxonomy labels" python 03_add_label.py || exit /b !ERRORLEVEL!
+call :run "Stage 01: DeepSeek export" "python 01_deepseek_export.py" || exit /b !ERRORLEVEL!
+call :run "Stage 02: generate titles and summaries" "python 02_generate_title_summary.py" || exit /b !ERRORLEVEL!
+call :run "Stage 03: add taxonomy labels" "python 03_add_label.py" || exit /b !ERRORLEVEL!
 
 echo.
 echo ========================================
@@ -67,17 +66,17 @@ exit /b 0
 
 :run
 set "STEP_NAME=%~1"
-shift /1
+set "RUN_CMD=%~2"
 echo.
 echo === %STEP_NAME% ===
-%*
+%RUN_CMD%
 if errorlevel 1 (
     set "EXIT_CODE=%ERRORLEVEL%"
     echo.
     echo ========================================
     echo ERROR: %STEP_NAME% failed.
     echo Exit code: !EXIT_CODE!
-    echo Command: %*
+    echo Command: %RUN_CMD%
     echo See the error output above for details.
     echo ========================================
     exit /b !EXIT_CODE!
