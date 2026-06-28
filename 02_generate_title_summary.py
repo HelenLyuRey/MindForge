@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 
-from mindforge.title_summary import load_config, run_pipeline
+from mindforge_core.title_summary import load_config, run_pipeline
 
 
 def main() -> None:

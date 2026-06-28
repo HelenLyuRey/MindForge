@@ -6,13 +6,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mindforge.hashing import stable_hash
-from mindforge.llm.client import llm_call_json
-from mindforge.llm.preflight import provider_preflight_check
-from mindforge.manifests import append_jsonl, read_jsonl
-from mindforge.markdown.filenames import slugify_filename
-from mindforge.markdown.frontmatter import build_frontmatter, extract_frontmatter_and_body
-from mindforge.title_summary.config import TitleSummaryConfig, load_config
+from mindforge_core.hashing import stable_hash
+from mindforge_core.llm.client import llm_call_json
+from mindforge_core.llm.preflight import provider_preflight_check
+from mindforge_core.manifests import append_jsonl, read_jsonl
+from mindforge_core.markdown.filenames import slugify_filename
+from mindforge_core.markdown.frontmatter import build_frontmatter, extract_frontmatter_and_body
+from mindforge_core.title_summary.config import TitleSummaryConfig, load_config
 
 
 def parse_date_from_filename(filename: str) -> str:

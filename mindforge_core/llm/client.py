@@ -6,9 +6,9 @@ from typing import Any
 
 import requests
 
-from mindforge.config import load_project_env
-from mindforge.llm.json_utils import parse_json_robust
-from mindforge.llm.kimi import kimi_call_json
+from mindforge_core.config import load_project_env
+from mindforge_core.llm.json_utils import parse_json_robust
+from mindforge_core.llm.kimi import kimi_call_json
 
 
 @dataclass(frozen=True)

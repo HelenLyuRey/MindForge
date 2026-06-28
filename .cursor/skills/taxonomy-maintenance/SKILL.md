@@ -1,6 +1,6 @@
 ---
 name: taxonomy-maintenance
-description: Design and maintain MindForge taxonomy files from intermediate markdown frontmatter. Use when creating, reviewing, or updating taxonomy_state/taxonomy_v*.json from original_title, generated_title, and summary fields.
+description: Design and maintain MindForge taxonomy files from pipeline_outputs/02_intermediate_markdowns frontmatter. Use when creating, reviewing, or updating taxonomy_state/taxonomy_v*.json from original_title, generated_title, and summary fields.
 disable-model-invocation: true
 ---
 
@@ -17,7 +17,7 @@ The taxonomy labels, category IDs, descriptions, and subtopics must be in Simpli
 Read these inputs before proposing taxonomy changes:
 
 1. `taxonomy_state/taxonomy_v*.json`: existing taxonomy versions.
-2. `intermediate_markdowns/*.md`: every intermediate markdown file.
+2. `pipeline_outputs/02_intermediate_markdowns/*.md`: every intermediate markdown file.
 3. From each markdown file, use only these frontmatter fields for taxonomy design:
    - `original_title`
    - `generated_title`
@@ -30,7 +30,7 @@ Do not use full conversation bodies for taxonomy design unless the user explicit
 Do not put every full markdown file into one prompt. Use a compact map-reduce workflow:
 
 1. Extract a frontmatter inventory:
-   - For every `intermediate_markdowns/*.md` file, collect `path`, `original_title`, `generated_title`, and `summary`.
+   - For every `pipeline_outputs/02_intermediate_markdowns/*.md` file, collect `path`, `original_title`, `generated_title`, and `summary`.
    - Do not regenerate titles or summaries. Use the existing frontmatter values.
    - Keep the inventory compact; exclude markdown body content.
 

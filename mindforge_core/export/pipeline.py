@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mindforge.config import ProjectPaths, get_paths
-from mindforge.export.api import fetch_all_conversations, fetch_messages
-from mindforge.export.auth import build_authenticated_session
-from mindforge.export.writer import write_exported_conversation
-from mindforge.manifests import load_json_manifest, save_json_manifest
+from mindforge_core.config import ProjectPaths, get_paths
+from mindforge_core.export.api import fetch_all_conversations, fetch_messages
+from mindforge_core.export.auth import build_authenticated_session
+from mindforge_core.export.writer import write_exported_conversation
+from mindforge_core.manifests import load_json_manifest, save_json_manifest
 
 logger = logging.getLogger(__name__)
 

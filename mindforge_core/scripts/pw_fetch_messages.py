@@ -1,6 +1,6 @@
 """
 Playwright subprocess: scrapes messages from a single conversation page.
-Called from the Jupyter notebook as a fallback when the API approach fails.
+Called by stage 1 as a fallback when the API approach fails.
 
 Usage: python pw_fetch_messages.py <cookie_file> <conversation_url> <page_timeout_ms>
 Output: prints "RESULT:{json}" to stdout on success.

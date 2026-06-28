@@ -1,8 +1,8 @@
 # MindForge
 
-MindForge exports DeepSeek conversations, generates note titles and summaries, applies a maintained taxonomy, and writes enriched Obsidian-ready Markdown notes.
+MindForge exports DeepSeek conversations, generates note titles and summaries, applies a maintained taxonomy, and writes tagged Obsidian-ready Markdown notes.
 
-The original notebooks are preserved in `notebooks_backlog/`. The active workflow now lives in importable Python modules under `mindforge/` with thin numbered entrypoint scripts at the project root.
+The original notebooks are preserved in `notebooks_backlog/`. The active workflow now lives in importable Python modules under `mindforge_core/` with thin numbered entrypoint scripts at the project root.
 
 ## Workflow
 
@@ -11,10 +11,18 @@ Run stages in this order:
 ```bash
 python 01_deepseek_export.py
 python 02_generate_title_summary.py
-python 04_note_tagging.py
+python 03_add_label.py
 ```
 
-If DeepSeek export access is blocked by network or IT policy, do not run `01_deepseek_export.py`. You can still run later stages against existing files in `DeepSeek_Exports/`, `intermediate_markdowns/`, and `taxonomy_state/`.
+Or run the full setup and pipeline on Windows:
+
+```bat
+run_pipeline.bat
+```
+
+`run_pipeline.bat` creates `mindforge-env` if needed, installs dependencies, installs Playwright Chromium, then runs stages 01, 02, and 03 in sequence. If any setup step or stage fails, it stops immediately and leaves the command error visible in the terminal.
+
+If DeepSeek export access is blocked by network or IT policy, do not run `01_deepseek_export.py`. You can still run later stages against existing files in `pipeline_outputs/01_deepseek_export/`, `pipeline_outputs/02_intermediate_markdowns/`, and `taxonomy_state/`.
 
 ## Project Structure
 
@@ -22,37 +30,37 @@ If DeepSeek export access is blocked by network or IT policy, do not run `01_dee
 MindForge/
 ├── 01_deepseek_export.py
 ├── 02_generate_title_summary.py
-├── 04_note_tagging.py
-├── mindforge/
+├── 03_add_label.py
+├── mindforge_core/
 │   ├── config.py
 │   ├── llm/
 │   ├── markdown/
 │   ├── export/
 │   ├── title_summary/
-│   ├── taxonomy/
-│   └── enrichment/
+│   ├── labels/
+│   └── scripts/
+│       ├── pw_login.py
+│       ├── pw_fetch_convos.py
+│       └── pw_fetch_messages.py
 ├── notebooks_backlog/
 │   ├── 1.deepseek_export.ipynb
 │   ├── 2.generate_title_summary_pipeline.ipynb
 │   ├── 3.taxonomy_refresh.ipynb
 │   └── 3.note_tagging.ipynb
-├── scripts/
-│   ├── pw_login.py
-│   ├── pw_fetch_convos.py
-│   └── pw_fetch_messages.py
-├── DeepSeek_Exports/
-├── intermediate_markdowns/
-├── taxonomy_state/
-└── DeepSeek_Enriched/
+├── pipeline_outputs/
+│   ├── 01_deepseek_export/
+│   ├── 02_intermediate_markdowns/
+│   └── 03_final_markdowns/
+└── taxonomy_state/
 ```
 
 ## Stages
 
 ### 1. Export DeepSeek Conversations
 
-`01_deepseek_export.py` exports DeepSeek chat history into `DeepSeek_Exports/` and updates `DeepSeek_Exports/conversations_manifest.json`.
+`01_deepseek_export.py` exports DeepSeek chat history into `pipeline_outputs/01_deepseek_export/` and updates `pipeline_outputs/01_deepseek_export/conversations_manifest.json`.
 
-It uses `DEEPSEEK_TOKEN` from `.env`, then tries DeepSeek API calls first and Playwright fallback scripts in `scripts/` if needed.
+It uses `DEEPSEEK_TOKEN` from `.env`, then tries DeepSeek API calls first and Playwright fallback scripts in `mindforge_core/scripts/` if needed.
 
 Run it from the project root:
 
@@ -78,7 +86,7 @@ Updated chats are re-exported. If the refreshed chat now writes to a different f
 
 ### 2. Generate Titles And Summaries
 
-`02_generate_title_summary.py` reads `DeepSeek_Exports/*.md`, generates `generated_title` and `summary`, and writes processed files into `intermediate_markdowns/`.
+`02_generate_title_summary.py` reads `pipeline_outputs/01_deepseek_export/*.md`, generates `generated_title` and `summary`, and writes processed files into `pipeline_outputs/02_intermediate_markdowns/`.
 
 Run it from the project root after Stage 1:
 
@@ -126,23 +134,27 @@ OLLAMA_MODEL=qwen2.5:7b-instruct
 
 The final JSON summary includes `new_sources`, `updated_sources`, and `skipped_unchanged`.
 
-### 3. Maintain Taxonomy
+### 3. Add Taxonomy Labels
 
-`taxonomy_state/taxonomy_v1.json` is the maintained taxonomy used by note tagging. Update it deliberately when categories need to change.
+`03_add_label.py` reads `pipeline_outputs/02_intermediate_markdowns/*.md`, matches each note to labels from `taxonomy_state/taxonomy_v1.json`, and writes Obsidian-ready Markdown into `pipeline_outputs/03_final_markdowns/`.
 
-### 4. Tag And Enrich Notes
+Run it from the project root after Stage 2:
 
-`04_note_tagging.py` reads original exports from `DeepSeek_Exports/`, applies categories from `taxonomy_state/taxonomy_v1.json`, generates refined titles, and writes enriched copies into `DeepSeek_Enriched/`.
+```bash
+python 03_add_label.py
+```
 
 Useful options:
 
 ```bash
-python 04_note_tagging.py --preview
-python 04_note_tagging.py --limit 5
-python 04_note_tagging.py --force
+python 03_add_label.py --preview
+python 03_add_label.py --limit 5
+python 03_add_label.py --force
 ```
 
-If `ENRICHED_OBSIDIAN_VAULT_PATH` is set in `.env`, enriched files are also copied into that vault under `ENRICHED_OBSIDIAN_SUBFOLDER` or `DeepSeek Tagged` by default.
+Stage 3 adds up to 5 flat tags to each note. Category labels and subtopics are treated equally, so an Obsidian note can be tagged with a mix such as `自我成长`, `情绪疗愈`, `灾难化心理`, `分离焦虑`, and `亲密陪伴`.
+
+`taxonomy_state/taxonomy_v1.json` is the maintained taxonomy used by note tagging. Update it deliberately when labels or subtopics need to change.
 
 ## Setup
 
@@ -153,6 +165,8 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+The setup commands above are also included in `run_pipeline.bat`. Before running the pipeline, copy `.env-example` to `.env` and fill in the required credentials. If `.env` is missing, the BAT file creates it from `.env-example` and stops so you can edit it first.
+
 ## Incremental Behavior
 
 - Stage 1 exports new DeepSeek chats that have not been saved locally before.
@@ -161,10 +175,10 @@ playwright install chromium
 - Stage 2 generates intermediate Markdown for newly exported chats.
 - Stage 2 regenerates intermediate Markdown when an exported chat changed after the previous intermediate file was created.
 - Stage 2 skips exported chats whose intermediate Markdown is already up to date.
-- Stage 4 skips enriched notes that are already up to date with the current source note and taxonomy.
+- Stage 3 skips final Markdown files that already exist unless `--force` is used.
 
 ## Notes
 
 - `deepseek_cookies.json` and `.env` may contain private credentials and should not be shared.
 - The notebook backlog is intentionally retained for reference and is not part of the active Python workflow.
-- Raw exports remain in `DeepSeek_Exports/`; enriched notes are written separately to `DeepSeek_Enriched/`.
+- Raw exports remain in `pipeline_outputs/01_deepseek_export/`; title/summary notes are written to `pipeline_outputs/02_intermediate_markdowns/`; tagged notes are written to `pipeline_outputs/03_final_markdowns/`.

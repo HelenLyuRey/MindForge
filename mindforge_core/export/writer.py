@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mindforge.markdown.filenames import make_filename
+from mindforge_core.markdown.filenames import make_filename
 
 
 def generate_markdown(conversation: dict[str, Any], messages: list[dict[str, str]]) -> str:

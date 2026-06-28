@@ -4,7 +4,7 @@ import os
 
 import requests
 
-from mindforge.config import load_project_env
+from mindforge_core.config import load_project_env
 
 
 def load_deepseek_token() -> str:

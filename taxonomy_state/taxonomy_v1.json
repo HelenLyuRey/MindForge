@@ -4,7 +4,7 @@
   "target_label_language": "zh-Hans",
   "structure": "flat_categories_with_subtopics",
   "source_corpus": {
-    "directory": "intermediate_markdowns",
+    "directory": "pipeline_outputs/02_intermediate_markdowns",
     "document_count": 164,
     "fields_used": [
       "original_title",
@@ -13,7 +13,7 @@
     ]
   },
   "design_notes": [
-    "本版本从全部 intermediate_markdowns 的 frontmatter 重新生成，未参考旧测试 taxonomy JSON。",
+    "本版本从全部 pipeline_outputs/02_intermediate_markdowns 的 frontmatter 重新生成，未参考旧测试 taxonomy JSON。",
     "采用扁平一级分类，并用 subtopics 捕捉细分主题，避免过深层级影响后续分类稳定性。",
     "分类标签与 category_id 均使用简体中文，方便人读与后续 Obsidian 检索。",
     "一级分类使用简洁大主题命名，避免使用“X与Y”式解释性长标签。"

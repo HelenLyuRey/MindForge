@@ -4,8 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from mindforge.config import get_paths, load_project_env
-from mindforge.llm.client import LLMConfig, load_llm_config
+from mindforge_core.config import get_paths, load_project_env
+from mindforge_core.llm.client import LLMConfig, load_llm_config
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 """
 Playwright subprocess: handles DeepSeek login & cookie/token capture.
-Called from the Jupyter notebook to avoid event loop conflicts.
+Called by stage 1 to avoid event loop conflicts.
 
 Uses a persistent Chrome profile so login state survives across runs.
 Google OAuth works because it's a real Chrome profile, not automation-detected.

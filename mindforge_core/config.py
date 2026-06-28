@@ -13,13 +13,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 @dataclass(frozen=True)
 class ProjectPaths:
     project_root: Path = PROJECT_ROOT
-    export_dir: Path = PROJECT_ROOT / "DeepSeek_Exports"
-    intermediate_dir: Path = PROJECT_ROOT / "intermediate_markdowns"
+    output_root: Path = PROJECT_ROOT / "pipeline_outputs"
+    export_dir: Path = PROJECT_ROOT / "pipeline_outputs" / "01_deepseek_export"
+    intermediate_dir: Path = PROJECT_ROOT / "pipeline_outputs" / "02_intermediate_markdowns"
+    final_dir: Path = PROJECT_ROOT / "pipeline_outputs" / "03_final_markdowns"
     taxonomy_state_dir: Path = PROJECT_ROOT / "taxonomy_state"
     taxonomy_file: Path = PROJECT_ROOT / "taxonomy_state" / "taxonomy_v1.json"
-    enriched_dir: Path = PROJECT_ROOT / "DeepSeek_Enriched"
     notebooks_backlog_dir: Path = PROJECT_ROOT / "notebooks_backlog"
-    scripts_dir: Path = PROJECT_ROOT / "scripts"
+    scripts_dir: Path = PROJECT_ROOT / "mindforge_core" / "scripts"
     cookie_file: Path = PROJECT_ROOT / "deepseek_cookies.json"
 
 

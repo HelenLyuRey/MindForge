@@ -1,6 +1,6 @@
 """
 Playwright subprocess: scrolls sidebar to scrape all conversation entries.
-Called from the Jupyter notebook as a fallback when the API approach fails.
+Called by stage 1 as a fallback when the API approach fails.
 
 Usage: python pw_fetch_convos.py <cookie_file> <page_timeout_ms>
 Output: prints "RESULT:{json}" to stdout on success.

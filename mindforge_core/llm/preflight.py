@@ -5,7 +5,7 @@ from typing import Any
 import requests
 import urllib3
 
-from mindforge.llm.client import LLMConfig, load_llm_config
+from mindforge_core.llm.client import LLMConfig, load_llm_config
 
 
 def provider_preflight_check(

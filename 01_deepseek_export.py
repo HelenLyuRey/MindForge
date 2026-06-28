@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 
-from mindforge.export import run_export
+from mindforge_core.export import run_export
 
 
 def main() -> None:

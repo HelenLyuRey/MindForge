@@ -7,9 +7,8 @@ deepseek_cookies.json
 # Persistent Chrome profile for login
 .chrome_profile/
 
-# Export outputs (optional — remove this line if you want to track exports in git)
-DeepSeek_Exports/
-intermediate_markdowns/
+# Pipeline outputs (optional — remove this line if you want to track generated markdowns in git)
+pipeline_outputs/
 
 # Python
 __pycache__/

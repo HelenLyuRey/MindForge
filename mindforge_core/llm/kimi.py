@@ -5,7 +5,7 @@ from typing import Any
 import requests
 import urllib3
 
-from mindforge.llm.json_utils import parse_json_robust
+from mindforge_core.llm.json_utils import parse_json_robust
 
 
 def kimi_call_json(
