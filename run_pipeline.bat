@@ -55,7 +55,7 @@ echo ========================================
 
 call :run "Stage 01: DeepSeek export" "python 01_deepseek_export.py" || exit /b !ERRORLEVEL!
 call :run "Stage 02: generate titles and summaries" "python 02_generate_title_summary.py" || exit /b !ERRORLEVEL!
-call :run "Stage 03: add taxonomy labels" "python 03_add_label.py" || exit /b !ERRORLEVEL!
+call :run "Stage 03: add kind, purpose, and tags" "python 03_add_label.py" || exit /b !ERRORLEVEL!
 
 echo.
 echo ========================================

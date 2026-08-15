@@ -18,6 +18,7 @@ class LabelConfig:
     llm: LLMConfig
     max_input_chars: int = 50000
     max_tags: int = 5
+    max_purposes: int = 2
 
 
 def load_config() -> LabelConfig:
@@ -32,4 +33,5 @@ def load_config() -> LabelConfig:
         llm=load_llm_config(),
         max_input_chars=int(os.getenv("LABEL_MAX_INPUT_CHARS", "50000")),
         max_tags=int(os.getenv("LABEL_MAX_TAGS", "5")),
+        max_purposes=int(os.getenv("LABEL_MAX_PURPOSES", "2")),
     )

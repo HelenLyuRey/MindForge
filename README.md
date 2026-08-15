@@ -4,6 +4,52 @@ MindForge exports DeepSeek conversations, generates note titles and summaries, a
 
 The original notebooks are preserved in `notebooks_backlog/`. The active workflow now lives in importable Python modules under `mindforge_core/` with thin numbered entrypoint scripts at the project root.
 
+## Note Layers
+
+Each note uses three separate layers. They answer different questions and should not be mixed into one tag list.
+
+| Layer | Field | Question | Values |
+|---|---|---|---|
+| Kind | `kind` | What kind of file is this? | `chat`, `essay` |
+| Purpose | `purpose` | What was this chat for, and will I reopen it? | `think-out-loud-reflection`, `deep-learning`, `creation`, `lookup` |
+| Tags | `tags` | What is this about? | Chinese taxonomy labels and subtopics, such as `自我成长` or `亲密关系` |
+
+**Kind** is the object type. `chat` is a DeepSeek conversation saved by this pipeline. `essay` is a standalone piece of writing: a birthday letter, a handwritten journal, or a later progress digest. Essays are not a fifth chat purpose. They live beside chat notes, can reuse the same topic tags, and can link back to the chats they grew from.
+
+**Purpose** is only for `kind: chat`. It says how the conversation was used, not what topic it covered. A note can have one or two purposes.
+
+- `think-out-loud-reflection`: messy thinking, journaling, decisions, emotional processing. Reopen later to see how you thought.
+- `deep-learning`: understand a concept, framework, or domain. Reopen later as knowledge.
+- `creation`: write, rewrite, design, script, slide, or prompt. The keepable thing is the artifact.
+- `lookup`: compare, recommend, plan, or ask a one-shot how-to. Rarely reopen.
+
+**Tags** are the topic layer from `taxonomy_state/taxonomy_v1.json`. They stay in Chinese. Category labels and subtopics are equal flat tags, so one note can mix `自我成长`, `情绪疗愈`, and `分离焦虑`.
+
+A pipeline chat note:
+
+```yaml
+kind: chat
+purpose:
+  - think-out-loud-reflection
+tags:
+  - 自我成长
+  - 身份转型
+  - 亲密关系
+```
+
+A handwritten birthday essay, or a later AI progress digest:
+
+```yaml
+kind: essay
+tags:
+  - 自我成长
+  - 亲密关系
+```
+
+Essays do not get `purpose`. Purpose describes a conversation. An essay is already the written piece.
+
+The chat pipeline produces `kind: chat` notes. Stage 3 stamps `kind: chat`, classifies `purpose` from the title and summary, and attaches topic `tags`. Essays are written in the vault, not exported from DeepSeek.
+
 ## Workflow
 
 Run stages in this order:
@@ -136,7 +182,7 @@ The final JSON summary includes `new_sources`, `updated_sources`, and `skipped_u
 
 ### 3. Add Taxonomy Labels
 
-`03_add_label.py` reads `pipeline_outputs/02_intermediate_markdowns/*.md`, matches each note to labels from `taxonomy_state/taxonomy_v1.json`, and writes Obsidian-ready Markdown into `pipeline_outputs/03_final_markdowns/`.
+`03_add_label.py` reads `pipeline_outputs/02_intermediate_markdowns/*.md`, stamps `kind: chat`, assigns `purpose`, matches topic labels from `taxonomy_state/taxonomy_v1.json`, and writes Obsidian-ready Markdown into `pipeline_outputs/03_final_markdowns/`.
 
 To also save the final notes into an Obsidian vault, set `OBSIDIAN_VAULT_PATH` in `.env`. Stage 3 writes the final Markdown files directly into that folder.
 
@@ -156,9 +202,16 @@ Useful options:
 python 03_add_label.py --preview
 python 03_add_label.py --limit 5
 python 03_add_label.py --force
+python 03_add_label.py --purpose-only
 ```
 
-Stage 3 adds up to 5 flat tags to each note. Category labels and subtopics are treated equally, so an Obsidian note can be tagged with a mix such as `自我成长`, `情绪疗愈`, `灾难化心理`, `分离焦虑`, and `亲密陪伴`.
+Stage 3 writes three layers onto each chat note:
+
+- `kind: chat` is always stamped. The pipeline does not classify essays.
+- `purpose` is a separate classifier that uses the title and summary. It chooses one or two of `think-out-loud-reflection`, `deep-learning`, `creation`, and `lookup`.
+- `tags` still come from the Chinese taxonomy. Category labels and subtopics are treated equally, so an Obsidian note can be tagged with a mix such as `自我成长`, `情绪疗愈`, `灾难化心理`, `分离焦虑`, and `亲密陪伴`.
+
+`--force` rebuilds tags and purpose. `--purpose-only` rebuilds purpose and keeps existing tags. See [Note Layers](#note-layers) for the full model.
 
 `taxonomy_state/taxonomy_v1.json` is the maintained taxonomy used by note tagging. Update it deliberately when labels or subtopics need to change.
 
@@ -181,7 +234,9 @@ The setup commands above are also included in `run_pipeline.bat`. Before running
 - Stage 2 generates intermediate Markdown for newly exported chats.
 - Stage 2 regenerates intermediate Markdown when an exported chat changed after the previous intermediate file was created.
 - Stage 2 skips exported chats whose intermediate Markdown is already up to date.
-- Stage 3 skips final Markdown files that already exist unless `--force` is used. If `OBSIDIAN_VAULT_PATH` is configured, skipped files are still synced from `pipeline_outputs/03_final_markdowns/` into the Obsidian destination.
+- Stage 3 skips final Markdown files that already have `kind`, `purpose`, and `tags`, unless `--force` or `--purpose-only` is used.
+- Stage 3 fills missing `purpose` without rebuilding existing tags.
+- If `OBSIDIAN_VAULT_PATH` is configured, skipped files are still synced from `pipeline_outputs/03_final_markdowns/` into the Obsidian destination.
 
 ## Notes
 

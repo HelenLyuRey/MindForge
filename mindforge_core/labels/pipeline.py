@@ -11,6 +11,49 @@ from mindforge_core.llm.preflight import provider_preflight_check
 from mindforge_core.markdown.frontmatter import build_frontmatter, extract_frontmatter_and_body
 
 
+CHAT_KIND = "chat"
+ALLOWED_PURPOSES = [
+    "think-out-loud-reflection",
+    "deep-learning",
+    "creation",
+    "lookup",
+]
+DEFAULT_PURPOSE = "lookup"
+
+PURPOSE_GUIDE = [
+    {
+        "id": "think-out-loud-reflection",
+        "use_when": (
+            "The user is processing thoughts, feelings, identity, a decision, or a messy situation. "
+            "They would reopen this later to see how they thought."
+        ),
+        "examples": "career vs relationship rumination, attachment processing, holiday dilemma",
+    },
+    {
+        "id": "deep-learning",
+        "use_when": (
+            "The user wants to understand how a concept, framework, or domain works. "
+            "They would reopen this as knowledge, not as a record of their inner life. "
+            "This is a purpose label, not a machine-learning topic tag."
+        ),
+        "examples": "how neural networks work, insurance industry structure, sleep-stage scoring",
+    },
+    {
+        "id": "creation",
+        "use_when": (
+            "The user is making an artifact: script, copy, design, prompt, slides, talking points, or a rewrite."
+        ),
+        "examples": "vlog script, Xiaohongshu caption, bathroom AI prompt, client POV deck",
+    },
+    {
+        "id": "lookup",
+        "use_when": (
+            "One-shot research, comparison, recommendation, itinerary, packing list, or how-to. Rarely reopened."
+        ),
+        "examples": "flight comparison, foundation recommendation, Maldives agency table",
+    },
+]
+
 FRONTMATTER_ORDER = [
     "date",
     "original_title",
@@ -20,9 +63,13 @@ FRONTMATTER_ORDER = [
     "summary",
     "source_file",
     "source_hash",
+    "kind",
+    "purpose",
     "tags",
     "classification_confidence",
     "classification_reason",
+    "purpose_confidence",
+    "purpose_reason",
 ]
 
 
@@ -88,6 +135,7 @@ def label_record(cfg: LabelConfig, row: dict[str, Any], taxonomy: dict[str, Any]
                 "Use only exact strings from allowed_tags.",
                 "Do not invent, translate, merge, or rename tags.",
                 "Rank tags from strongest to weakest match.",
+                "Do not assign purpose values; tags are the topic layer only.",
             ],
             "allowed_tags": allowed_tags,
             "taxonomy_context": taxonomy["categories"],
@@ -115,18 +163,64 @@ def label_record(cfg: LabelConfig, row: dict[str, Any], taxonomy: dict[str, Any]
         temperature=0.0,
     )
 
-    tags = _valid_tags(output.get("tags"), allowed_tags)[: cfg.max_tags]
+    tags = _valid_choice_list(output.get("tags"), allowed_tags)[: cfg.max_tags]
     if not tags:
         tags = [allowed_tags[0]]
 
-    confidence = output.get("confidence", 0.0)
-    if not isinstance(confidence, (int, float)):
-        confidence = 0.0
-
     return {
         "tags": tags,
-        "confidence": round(float(confidence), 4),
+        "confidence": _as_confidence(output.get("confidence")),
         "reason": str(output.get("reason", "")).strip()[:280],
+    }
+
+
+def classify_purpose(cfg: LabelConfig, row: dict[str, Any]) -> dict[str, Any]:
+    user_prompt = json.dumps(
+        {
+            "task": "Assign purpose labels for one chat note",
+            "max_purposes": cfg.max_purposes,
+            "rules": [
+                "Purpose is how the chat was used, not what topic it is about.",
+                "Do not infer purpose from topic tags or life domains.",
+                "deep-learning means the user wanted to understand a concept; it is not an AI/ML topic tag.",
+                f"Choose 1 purpose, or 2 if the chat clearly mixes purposes. Never more than {cfg.max_purposes}.",
+                "Use only exact strings from allowed_purposes.",
+                "Do not invent, translate, merge, or rename purposes.",
+                "Ask: months later, would they reopen this to see their past self, the knowledge, the artifact, or not at all?",
+            ],
+            "allowed_purposes": ALLOWED_PURPOSES,
+            "purpose_guide": PURPOSE_GUIDE,
+            "document": {
+                "generated_title": row["frontmatter"].get("generated_title", ""),
+                "original_title": row["frontmatter"].get("original_title", ""),
+                "summary": row["summary"],
+            },
+            "output_schema": {
+                "purpose": [f"up to {cfg.max_purposes} exact allowed purpose strings"],
+                "confidence": "0..1",
+                "reason": "short string explaining the strongest matches",
+            },
+        },
+        ensure_ascii=False,
+    )
+    output = llm_call_json(
+        (
+            "You assign chat-purpose labels from a fixed English vocabulary. "
+            "Return strict JSON only. Purpose values must be exact strings from allowed_purposes."
+        ),
+        user_prompt,
+        config=cfg.llm,
+        temperature=0.0,
+    )
+
+    purpose = _valid_choice_list(output.get("purpose"), ALLOWED_PURPOSES)[: cfg.max_purposes]
+    if not purpose:
+        purpose = [DEFAULT_PURPOSE]
+
+    return {
+        "purpose": purpose,
+        "purpose_confidence": _as_confidence(output.get("confidence")),
+        "purpose_reason": str(output.get("reason", "")).strip()[:280],
     }
 
 
@@ -168,9 +262,13 @@ def get_obsidian_output_dir(cfg: LabelConfig) -> Path | None:
 
 def render_tagged_markdown(row: dict[str, Any], decision: dict[str, Any]) -> str:
     frontmatter = dict(row["frontmatter"])
+    frontmatter["kind"] = CHAT_KIND
+    frontmatter["purpose"] = decision["purpose"]
     frontmatter["tags"] = decision["tags"]
     frontmatter["classification_confidence"] = decision["confidence"]
     frontmatter["classification_reason"] = decision["reason"]
+    frontmatter["purpose_confidence"] = decision["purpose_confidence"]
+    frontmatter["purpose_reason"] = decision["purpose_reason"]
 
     ordered_keys = [key for key in FRONTMATTER_ORDER if key in frontmatter]
     ordered_keys.extend(key for key in frontmatter if key not in ordered_keys)
@@ -184,6 +282,7 @@ def run_pipeline(
     limit: int | None = None,
     force: bool = False,
     preview: bool = False,
+    purpose_only: bool = False,
 ) -> list[dict[str, Any]]:
     cfg = cfg or load_config()
     provider_preflight_check(config=cfg.llm)
@@ -199,7 +298,32 @@ def run_pipeline(
     results: list[dict[str, Any]] = []
     for row in selected:
         output_path = cfg.final_dir / row["filename"]
-        if output_path.exists() and not force and not preview:
+        existing = _read_existing_output(output_path)
+        need_tags, need_purpose = _needed_updates(
+            existing,
+            force=force,
+            preview=preview,
+            purpose_only=purpose_only,
+        )
+
+        if existing and not need_tags and not need_purpose and not preview:
+            if existing.get("kind") != CHAT_KIND:
+                decision = _decision_from_existing(existing)
+                published = publish_record(cfg, row, decision)
+                output_path = published["output_path"] or output_path
+                results.append(
+                    _result_row(
+                        cfg,
+                        row,
+                        decision,
+                        status="updated",
+                        output_path=output_path,
+                        obsidian_path=published["obsidian_path"],
+                        updated_fields=["kind"],
+                    )
+                )
+                continue
+
             obsidian_path = sync_existing_to_obsidian(cfg, output_path)
             results.append(
                 {
@@ -207,31 +331,124 @@ def run_pipeline(
                     "source_file": row["filename"],
                     "output_file": str(output_path.relative_to(cfg.project_root)),
                     "obsidian_output_file": str(obsidian_path) if obsidian_path else None,
-                    "reason": "output exists; use --force to rebuild",
+                    "reason": "output exists with kind, purpose, and tags; use --force or --purpose-only to rebuild",
                 }
             )
             continue
 
-        decision = label_record(cfg, row, taxonomy)
+        if need_tags:
+            tag_decision = label_record(cfg, row, taxonomy)
+        else:
+            tag_decision = {
+                "tags": existing["tags"] if existing else [],
+                "confidence": _as_confidence(existing.get("classification_confidence") if existing else 0.0),
+                "reason": str(existing.get("classification_reason", "") if existing else ""),
+            }
+
+        if need_purpose:
+            purpose_decision = classify_purpose(cfg, row)
+        else:
+            purpose_decision = {
+                "purpose": existing["purpose"] if existing else [DEFAULT_PURPOSE],
+                "purpose_confidence": _as_confidence(
+                    existing.get("purpose_confidence") if existing else 0.0
+                ),
+                "purpose_reason": str(existing.get("purpose_reason", "") if existing else ""),
+            }
+
+        decision = {**tag_decision, **purpose_decision}
         published: dict[str, Path | None] = {"output_path": None, "obsidian_path": None}
         if not preview:
             published = publish_record(cfg, row, decision)
             output_path = published["output_path"] or output_path
 
+        updated_fields = [field for field, needed in (("tags", need_tags), ("purpose", need_purpose)) if needed]
+        if existing is None or existing.get("kind") != CHAT_KIND:
+            updated_fields.append("kind")
+
         results.append(
-            {
-                "status": "preview" if preview else "updated",
-                "source_file": row["filename"],
-                "output_file": None if preview else str(output_path.relative_to(cfg.project_root)),
-                "obsidian_output_file": None
-                if preview or published["obsidian_path"] is None
-                else str(published["obsidian_path"]),
-                "tags": decision["tags"],
-                "confidence": decision["confidence"],
-                "reason": decision["reason"],
-            }
+            _result_row(
+                cfg,
+                row,
+                decision,
+                status="preview" if preview else "updated",
+                output_path=None if preview else output_path,
+                obsidian_path=None if preview else published["obsidian_path"],
+                updated_fields=updated_fields,
+            )
         )
     return results
+
+
+def _needed_updates(
+    existing: dict[str, Any] | None,
+    *,
+    force: bool,
+    preview: bool,
+    purpose_only: bool,
+) -> tuple[bool, bool]:
+    has_tags = bool(existing and existing.get("tags"))
+    has_purpose = bool(existing and existing.get("purpose"))
+    if purpose_only:
+        return (not has_tags), True
+    if preview or force:
+        return True, True
+    return (not has_tags, not has_purpose)
+
+
+def _read_existing_output(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+
+    raw = path.read_text(encoding="utf-8", errors="ignore")
+    frontmatter, _ = extract_frontmatter_and_body(raw)
+    frontmatter = _normalize_frontmatter_values(frontmatter)
+    return {
+        "kind": str(frontmatter.get("kind", "")).strip(),
+        "purpose": _valid_choice_list(frontmatter.get("purpose"), ALLOWED_PURPOSES),
+        "tags": _as_str_list(frontmatter.get("tags")),
+        "classification_confidence": frontmatter.get("classification_confidence", ""),
+        "classification_reason": frontmatter.get("classification_reason", ""),
+        "purpose_confidence": frontmatter.get("purpose_confidence", ""),
+        "purpose_reason": frontmatter.get("purpose_reason", ""),
+    }
+
+
+def _decision_from_existing(existing: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tags": existing.get("tags") or [],
+        "confidence": _as_confidence(existing.get("classification_confidence")),
+        "reason": str(existing.get("classification_reason", "")),
+        "purpose": existing.get("purpose") or [DEFAULT_PURPOSE],
+        "purpose_confidence": _as_confidence(existing.get("purpose_confidence")),
+        "purpose_reason": str(existing.get("purpose_reason", "")),
+    }
+
+
+def _result_row(
+    cfg: LabelConfig,
+    row: dict[str, Any],
+    decision: dict[str, Any],
+    *,
+    status: str,
+    output_path: Path | None,
+    obsidian_path: Path | None,
+    updated_fields: list[str],
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "source_file": row["filename"],
+        "output_file": None if output_path is None else str(output_path.relative_to(cfg.project_root)),
+        "obsidian_output_file": None if obsidian_path is None else str(obsidian_path),
+        "kind": CHAT_KIND,
+        "purpose": decision["purpose"],
+        "tags": decision["tags"],
+        "confidence": decision["confidence"],
+        "reason": decision["reason"],
+        "purpose_confidence": decision["purpose_confidence"],
+        "purpose_reason": decision["purpose_reason"],
+        "updated_fields": updated_fields,
+    }
 
 
 def _find_row(cfg: LabelConfig, rows: list[dict[str, Any]], md_path: str) -> dict[str, Any]:
@@ -250,21 +467,39 @@ def _find_row(cfg: LabelConfig, rows: list[dict[str, Any]], md_path: str) -> dic
     return row
 
 
-def _valid_tags(raw_tags: Any, allowed_tags: list[str]) -> list[str]:
-    if not isinstance(raw_tags, list):
-        return []
-
-    allowed = set(allowed_tags)
-    valid_tags: list[str] = []
-    for raw_tag in raw_tags:
-        tag = str(raw_tag).strip()
-        if tag in allowed and tag not in valid_tags:
-            valid_tags.append(tag)
-    return valid_tags
+def _valid_choice_list(raw_values: Any, allowed_values: list[str]) -> list[str]:
+    allowed = set(allowed_values)
+    valid_values: list[str] = []
+    for raw_value in _as_str_list(raw_values):
+        value = raw_value.strip()
+        if value in allowed and value not in valid_values:
+            valid_values.append(value)
+    return valid_values
 
 
-def _normalize_frontmatter_values(frontmatter: dict[str, str]) -> dict[str, str]:
-    return {key: value.replace('\\"', '"') for key, value in frontmatter.items()}
+def _as_str_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _as_confidence(value: Any) -> float:
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_frontmatter_values(frontmatter: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for key, value in frontmatter.items():
+        if isinstance(value, list):
+            normalized[key] = [str(item).replace('\\"', '"') for item in value]
+        else:
+            normalized[key] = str(value).replace('\\"', '"')
+    return normalized
 
 
 def _unique_preserving_order(values: list[str]) -> list[str]:
