@@ -48,7 +48,7 @@ tags:
 
 Essays do not get `purpose`. Purpose describes a conversation. An essay is already the written piece.
 
-The chat pipeline produces `kind: chat` notes. Stage 3 stamps `kind: chat`, classifies `purpose` from the title and summary, and attaches topic `tags`. Essays are written in the vault, not exported from DeepSeek.
+The chat pipeline produces `kind: chat` notes. Stage 3 stamps `kind: chat`, classifies `purpose` from the title and summary, and attaches topic `tags`. If `OBSIDIAN_VAULT_PATH` is set, Stage 3 creates a `chats/` folder in that vault and writes chat notes there. Essays are handwritten in an `essays/` folder in the same vault; they are not exported from DeepSeek.
 
 ## Workflow
 
@@ -184,10 +184,16 @@ The final JSON summary includes `new_sources`, `updated_sources`, and `skipped_u
 
 `03_add_label.py` reads `pipeline_outputs/02_intermediate_markdowns/*.md`, stamps `kind: chat`, assigns `purpose`, matches topic labels from `taxonomy_state/taxonomy_v1.json`, and writes Obsidian-ready Markdown into `pipeline_outputs/03_final_markdowns/`.
 
-To also save the final notes into an Obsidian vault, set `OBSIDIAN_VAULT_PATH` in `.env`. Stage 3 writes the final Markdown files directly into that folder.
+To also save the final notes into an Obsidian vault, set `OBSIDIAN_VAULT_PATH` in `.env` to the vault root. Stage 3 creates `chats/` inside that vault if needed and writes chat notes there. You do not need to create `chats/` yourself.
 
 ```env
 OBSIDIAN_VAULT_PATH=C:\Users\you\Documents\Obsidian\MyVault
+```
+
+```text
+MyVault/
+  chats/      ← Stage 3 writes kind: chat notes here
+  essays/     ← handwritten essays; not created by the pipeline
 ```
 
 Run it from the project root after Stage 2:
@@ -236,10 +242,10 @@ The setup commands above are also included in `run_pipeline.bat`. Before running
 - Stage 2 skips exported chats whose intermediate Markdown is already up to date.
 - Stage 3 skips final Markdown files that already have `kind`, `purpose`, and `tags`, unless `--force` or `--purpose-only` is used.
 - Stage 3 fills missing `purpose` without rebuilding existing tags.
-- If `OBSIDIAN_VAULT_PATH` is configured, skipped files are still synced from `pipeline_outputs/03_final_markdowns/` into the Obsidian destination.
+- If `OBSIDIAN_VAULT_PATH` is configured, skipped files are still copied from `pipeline_outputs/03_final_markdowns/` into the vault `chats/` folder. This copy does not regenerate tags or purpose.
 
 ## Notes
 
 - `deepseek_cookies.json` and `.env` may contain private credentials and should not be shared.
 - The notebook backlog is intentionally retained for reference and is not part of the active Python workflow.
-- Raw exports remain in `pipeline_outputs/01_deepseek_export/`; title/summary notes are written to `pipeline_outputs/02_intermediate_markdowns/`; tagged notes are written to `pipeline_outputs/03_final_markdowns/`. If configured, tagged notes are also copied into the Obsidian vault destination.
+- Raw exports remain in `pipeline_outputs/01_deepseek_export/`; title/summary notes are written to `pipeline_outputs/02_intermediate_markdowns/`; tagged notes are written to `pipeline_outputs/03_final_markdowns/`. If configured, tagged notes are also copied into the vault `chats/` folder.

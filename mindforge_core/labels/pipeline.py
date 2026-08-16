@@ -255,7 +255,7 @@ def get_obsidian_output_dir(cfg: LabelConfig) -> Path | None:
     if cfg.obsidian_vault_path is None:
         return None
 
-    output_dir = cfg.obsidian_vault_path
+    output_dir = cfg.obsidian_vault_path / cfg.obsidian_chats_folder
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
