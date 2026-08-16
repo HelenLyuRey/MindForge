@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import sys
 
+from mindforge_core.console import configure_console, print_json
 from mindforge_core.export import run_export
 
 
 def main() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    configure_console()
 
     parser = argparse.ArgumentParser(description="Stage 1: export DeepSeek conversations to Markdown.")
     parser.add_argument("--limit", type=int, default=None, help="Optional maximum number of conversations to export.")
@@ -18,7 +16,7 @@ def main() -> None:
     args = parser.parse_args()
     if not args.quiet:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
-    print(json.dumps(run_export(limit=args.limit), ensure_ascii=False, indent=2))
+    print_json(run_export(limit=args.limit))
 
 
 if __name__ == "__main__":

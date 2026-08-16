@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import sys
 
+from mindforge_core.console import configure_console, print_json
 from mindforge_core.title_summary import load_config, run_pipeline
 
 
 def main() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    configure_console()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -25,7 +23,7 @@ def main() -> None:
         overwrite=args.overwrite,
         resume_from_checkpoint=not args.no_resume,
     )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print_json(result)
 
 
 if __name__ == "__main__":

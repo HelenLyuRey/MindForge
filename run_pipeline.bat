@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+chcp 65001 >nul
 
 cd /d "%~dp0"
 
@@ -14,11 +15,13 @@ where python >nul 2>nul
 if errorlevel 1 (
     echo ERROR: Python was not found on PATH.
     echo Install Python 3.12+ or enable "Add Python to PATH", then rerun this file.
+    call :pause_window
     exit /b 1
 )
 
 if not exist "requirements.txt" (
     echo ERROR: requirements.txt was not found. Run this file from the MindForge project root.
+    call :pause_window
     exit /b 1
 )
 
@@ -27,9 +30,11 @@ if not exist ".env" (
         copy ".env-example" ".env" >nul
         echo ERROR: .env was missing, so I created one from .env-example.
         echo Fill in .env first, especially DEEPSEEK_TOKEN and KIMI_API_KEY, then rerun this file.
+        call :pause_window
         exit /b 1
     )
     echo ERROR: .env was not found. Create .env with your DeepSeek and LLM credentials, then rerun this file.
+    call :pause_window
     exit /b 1
 )
 
@@ -42,6 +47,7 @@ if not exist "mindforge-env\Scripts\python.exe" (
 call "mindforge-env\Scripts\activate.bat"
 if errorlevel 1 (
     echo ERROR: Could not activate mindforge-env.
+    call :pause_window
     exit /b 1
 )
 
@@ -62,6 +68,7 @@ echo ========================================
 echo MindForge pipeline completed successfully.
 echo Final markdowns: pipeline_outputs\03_final_markdowns
 echo ========================================
+call :pause_window
 exit /b 0
 
 :run
@@ -79,6 +86,13 @@ if errorlevel 1 (
     echo Command: %RUN_CMD%
     echo See the error output above for details.
     echo ========================================
+    call :pause_window
     exit /b !EXIT_CODE!
 )
+exit /b 0
+
+:pause_window
+echo.
+echo Press any key to close this window.
+pause >nul
 exit /b 0
