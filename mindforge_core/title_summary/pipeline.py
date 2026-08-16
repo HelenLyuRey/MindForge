@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,8 @@ from mindforge_core.manifests import append_jsonl, read_jsonl
 from mindforge_core.markdown.filenames import slugify_filename
 from mindforge_core.markdown.frontmatter import build_frontmatter, extract_frontmatter_and_body
 from mindforge_core.title_summary.config import TitleSummaryConfig, load_config
+
+logger = logging.getLogger(__name__)
 
 
 def parse_date_from_filename(filename: str) -> str:
@@ -185,8 +188,10 @@ def run_pipeline(
     output_count = 0
     failure_count = 0
     samples: list[dict[str, str]] = []
+    total_to_process = len(rows)
 
-    for row in rows:
+    for index, row in enumerate(rows, start=1):
+        source_file = str(row.get("source_file", "<unknown>"))
         try:
             transformed = [transform_record(cfg, row)]
             validate_records(transformed)
@@ -199,7 +204,7 @@ def run_pipeline(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "status": "ok",
-                    "source_file": row.get("source_file", ""),
+                    "source_file": source_file,
                     "source_hash": row.get("source_hash", ""),
                     "source_modified_at": row.get("source_modified_at", ""),
                     "output_file": published[0].get("output_file", ""),
@@ -208,6 +213,7 @@ def run_pipeline(
                     "error": transformed[0].get("error", ""),
                 },
             )
+            logger.info("Processed %d/%d: %s -> %s", index, total_to_process, source_file, published[0].get("output_file", "<unknown>"))
         except Exception as exc:
             failure_count += 1
             append_jsonl(
@@ -215,11 +221,19 @@ def run_pipeline(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "status": "failed",
-                    "source_file": row.get("source_file", ""),
+                    "source_file": source_file,
                     "source_hash": row.get("source_hash", ""),
                     "error": str(exc)[:500],
                 },
             )
+            logger.warning("Failed %d/%d: %s (%s)", index, total_to_process, source_file, exc)
+
+    logger.info(
+        "Stage 2 complete: processed=%d, skipped=%d, failed=%d",
+        output_count,
+        skipped_count,
+        failure_count,
+    )
 
     return {
         "started_at": started.isoformat(),

@@ -34,7 +34,7 @@ if not exist ".env" (
 )
 
 if not exist "mindforge-env\Scripts\python.exe" (
-    call :run "Setup: create virtual environment" python -m venv mindforge-env || exit /b !ERRORLEVEL!
+    call :run "Setup: create virtual environment" "python -m venv mindforge-env" || exit /b !ERRORLEVEL!
 ) else (
     echo Setup: virtual environment already exists.
 )
