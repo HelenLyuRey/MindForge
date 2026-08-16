@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from mindforge_core.llm.client import llm_call_json
 from mindforge_core.llm.preflight import provider_preflight_check
 from mindforge_core.markdown.frontmatter import build_frontmatter, extract_frontmatter_and_body
 
+logger = logging.getLogger(__name__)
 
 CHAT_KIND = "chat"
 ALLOWED_PURPOSES = [
@@ -123,6 +125,47 @@ def ingest_intermediate_markdowns(cfg: LabelConfig) -> list[dict[str, Any]]:
 
 
 def label_record(cfg: LabelConfig, row: dict[str, Any], taxonomy: dict[str, Any]) -> dict[str, Any]:
+    return _label_record_with_document(
+        cfg,
+        row,
+        taxonomy,
+        {
+            "generated_title": row["frontmatter"].get("generated_title", ""),
+            "original_title": row["frontmatter"].get("original_title", ""),
+            "summary": row["summary"],
+            "markdown_body": row["body"][: cfg.max_input_chars],
+        },
+        system_prompt=(
+            "You assign Obsidian-ready tags from a fixed Chinese taxonomy. "
+            "Return strict JSON only. Tags must be exact strings from allowed_tags."
+        ),
+    )
+
+
+def label_record_fallback(cfg: LabelConfig, row: dict[str, Any], taxonomy: dict[str, Any]) -> dict[str, Any]:
+    return _label_record_with_document(
+        cfg,
+        row,
+        taxonomy,
+        {
+            "generated_title": row["frontmatter"].get("generated_title", ""),
+            "original_title": row["frontmatter"].get("original_title", ""),
+            "summary": row["summary"],
+        },
+        system_prompt=(
+            "You assign Obsidian-ready tags from a fixed Chinese taxonomy. "
+            "Return strict JSON only. Use only the document title and summary for tag matching; do not rely on the full markdown body."
+        ),
+    )
+
+
+def _label_record_with_document(
+    cfg: LabelConfig,
+    row: dict[str, Any],
+    taxonomy: dict[str, Any],
+    document: dict[str, Any],
+    system_prompt: str,
+) -> dict[str, Any]:
     allowed_tags = taxonomy["flat_tags"]
     user_prompt = json.dumps(
         {
@@ -139,12 +182,7 @@ def label_record(cfg: LabelConfig, row: dict[str, Any], taxonomy: dict[str, Any]
             ],
             "allowed_tags": allowed_tags,
             "taxonomy_context": taxonomy["categories"],
-            "document": {
-                "generated_title": row["frontmatter"].get("generated_title", ""),
-                "original_title": row["frontmatter"].get("original_title", ""),
-                "summary": row["summary"],
-                "markdown_body": row["body"][: cfg.max_input_chars],
-            },
+            "document": document,
             "output_schema": {
                 "tags": [f"up to {cfg.max_tags} exact allowed tag strings"],
                 "confidence": "0..1",
@@ -153,15 +191,7 @@ def label_record(cfg: LabelConfig, row: dict[str, Any], taxonomy: dict[str, Any]
         },
         ensure_ascii=False,
     )
-    output = llm_call_json(
-        (
-            "You assign Obsidian-ready tags from a fixed Chinese taxonomy. "
-            "Return strict JSON only. Tags must be exact strings from allowed_tags."
-        ),
-        user_prompt,
-        config=cfg.llm,
-        temperature=0.0,
-    )
+    output = llm_call_json(system_prompt, user_prompt, config=cfg.llm, temperature=0.0)
 
     tags = _valid_choice_list(output.get("tags"), allowed_tags)[: cfg.max_tags]
     if not tags:
@@ -296,7 +326,9 @@ def run_pipeline(
         selected = selected[:limit]
 
     results: list[dict[str, Any]] = []
-    for row in selected:
+    failed_rows: list[tuple[dict[str, Any], str]] = []
+    total_to_process = len(selected)
+    for index, row in enumerate(selected, start=1):
         output_path = cfg.final_dir / row["filename"]
         existing = _read_existing_output(output_path)
         need_tags, need_purpose = _needed_updates(
@@ -334,8 +366,17 @@ def run_pipeline(
                     "reason": "output exists with kind, purpose, and tags; use --force or --purpose-only to rebuild",
                 }
             )
+            logger.info("Skipped %d/%d: %s (%s)", index, total_to_process, row["filename"], "output exists")
             continue
 
+        try:
+            decision = label_record(cfg, row, taxonomy)
+        except Exception as exc:
+            failed_rows.append((row, str(exc)))
+            logger.warning("Failed %d/%d: %s (%s)", index, total_to_process, row["filename"], exc)
+            continue
+
+        # Recompute only what's needed; reuse existing frontmatter values when available.
         if need_tags:
             tag_decision = label_record(cfg, row, taxonomy)
         else:
@@ -357,6 +398,7 @@ def run_pipeline(
             }
 
         decision = {**tag_decision, **purpose_decision}
+
         published: dict[str, Path | None] = {"output_path": None, "obsidian_path": None}
         if not preview:
             published = publish_record(cfg, row, decision)
@@ -377,6 +419,62 @@ def run_pipeline(
                 updated_fields=updated_fields,
             )
         )
+        logger.info(
+            "Processed %d/%d: %s -> %s",
+            index,
+            total_to_process,
+            row["filename"],
+            "preview" if preview else (published["output_path"].name if published["output_path"] else output_path.name),
+        )
+
+    if failed_rows and not preview:
+        logger.info("Retrying %d failed rows with fallback labeling...", len(failed_rows))
+        for row, first_error in failed_rows:
+            try:
+                decision = label_record_fallback(cfg, row, taxonomy)
+            except Exception as exc:
+                logger.error(
+                    "Fallback failed for %s after initial failure (%s): %s",
+                    row["filename"],
+                    first_error,
+                    exc,
+                )
+                results.append(
+                    {
+                        "status": "failed",
+                        "source_file": row["filename"],
+                        "output_file": None,
+                        "obsidian_output_file": None,
+                        "tags": [],
+                        "confidence": 0.0,
+                        "reason": f"Initial: {first_error}; fallback: {exc}",
+                    }
+                )
+                continue
+
+            published = publish_record(cfg, row, decision)
+            output_path = published["output_path"] or (cfg.final_dir / row["filename"])
+            results.append(
+                {
+                    "status": "fallback",
+                    "source_file": row["filename"],
+                    "output_file": str(output_path.relative_to(cfg.project_root)),
+                    "obsidian_output_file": str(published["obsidian_path"]) if published["obsidian_path"] else None,
+                    "tags": decision["tags"],
+                    "confidence": decision["confidence"],
+                    "reason": f"fallback after initial failure: {first_error}",
+                }
+            )
+            logger.info(
+                "Fallback processed: %s -> %s",
+                row["filename"],
+                published["output_path"].name if published["output_path"] else row["filename"],
+            )
+
+    if failed_rows:
+        failed_list = [f"{row['filename']}: {row['frontmatter'].get('generated_title', row['frontmatter'].get('original_title', row['filename']))}" for row, _ in failed_rows]
+        logger.info("Failed rows after Stage 3 initial pass: %s", failed_list)
+
     return results
 
 

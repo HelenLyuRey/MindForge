@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 
 from mindforge_core.title_summary import load_config, run_pipeline
@@ -10,6 +11,8 @@ from mindforge_core.title_summary import load_config, run_pipeline
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     parser = argparse.ArgumentParser(description="Stage 2: generate title and summary markdowns.")
     parser.add_argument("--limit", type=int, default=None, help="Optional maximum number of notes to process.")
