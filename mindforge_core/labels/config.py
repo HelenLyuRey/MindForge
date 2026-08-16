@@ -14,9 +14,9 @@ class LabelConfig:
     intermediate_dir: Path
     final_dir: Path
     obsidian_vault_path: Path | None
-    obsidian_chats_folder: str = "chats"
     taxonomy_file: Path
     llm: LLMConfig
+    obsidian_chats_folder: str = "chats"
     max_input_chars: int = 50000
     max_tags: int = 5
     max_purposes: int = 2

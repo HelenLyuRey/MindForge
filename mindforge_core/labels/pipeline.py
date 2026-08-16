@@ -326,7 +326,7 @@ def run_pipeline(
         selected = selected[:limit]
 
     results: list[dict[str, Any]] = []
-    failed_rows: list[tuple[dict[str, Any], str]] = []
+    failed_rows: list[dict[str, Any]] = []
     total_to_process = len(selected)
     for index, row in enumerate(selected, start=1):
         output_path = cfg.final_dir / row["filename"]
@@ -354,6 +354,7 @@ def run_pipeline(
                         updated_fields=["kind"],
                     )
                 )
+                logger.info("Processed %d/%d: %s -> %s (kind only)", index, total_to_process, row["filename"], output_path.name)
                 continue
 
             obsidian_path = sync_existing_to_obsidian(cfg, output_path)
@@ -370,68 +371,68 @@ def run_pipeline(
             continue
 
         try:
-            decision = label_record(cfg, row, taxonomy)
-        except Exception as exc:
-            failed_rows.append((row, str(exc)))
-            logger.warning("Failed %d/%d: %s (%s)", index, total_to_process, row["filename"], exc)
-            continue
-
-        # Recompute only what's needed; reuse existing frontmatter values when available.
-        if need_tags:
-            tag_decision = label_record(cfg, row, taxonomy)
-        else:
-            tag_decision = {
-                "tags": existing["tags"] if existing else [],
-                "confidence": _as_confidence(existing.get("classification_confidence") if existing else 0.0),
-                "reason": str(existing.get("classification_reason", "") if existing else ""),
-            }
-
-        if need_purpose:
-            purpose_decision = classify_purpose(cfg, row)
-        else:
-            purpose_decision = {
-                "purpose": existing["purpose"] if existing else [DEFAULT_PURPOSE],
-                "purpose_confidence": _as_confidence(
-                    existing.get("purpose_confidence") if existing else 0.0
-                ),
-                "purpose_reason": str(existing.get("purpose_reason", "") if existing else ""),
-            }
-
-        decision = {**tag_decision, **purpose_decision}
-
-        published: dict[str, Path | None] = {"output_path": None, "obsidian_path": None}
-        if not preview:
-            published = publish_record(cfg, row, decision)
-            output_path = published["output_path"] or output_path
-
-        updated_fields = [field for field, needed in (("tags", need_tags), ("purpose", need_purpose)) if needed]
-        if existing is None or existing.get("kind") != CHAT_KIND:
-            updated_fields.append("kind")
-
-        results.append(
-            _result_row(
+            decision = _classify_layers(
                 cfg,
                 row,
-                decision,
-                status="preview" if preview else "updated",
-                output_path=None if preview else output_path,
-                obsidian_path=None if preview else published["obsidian_path"],
-                updated_fields=updated_fields,
+                taxonomy,
+                existing,
+                need_tags=need_tags,
+                need_purpose=need_purpose,
             )
-        )
-        logger.info(
-            "Processed %d/%d: %s -> %s",
-            index,
-            total_to_process,
-            row["filename"],
-            "preview" if preview else (published["output_path"].name if published["output_path"] else output_path.name),
-        )
+            published: dict[str, Path | None] = {"output_path": None, "obsidian_path": None}
+            if not preview:
+                published = publish_record(cfg, row, decision)
+                output_path = published["output_path"] or output_path
+
+            updated_fields = [field for field, needed in (("tags", need_tags), ("purpose", need_purpose)) if needed]
+            if existing is None or existing.get("kind") != CHAT_KIND:
+                updated_fields.append("kind")
+
+            results.append(
+                _result_row(
+                    cfg,
+                    row,
+                    decision,
+                    status="preview" if preview else "updated",
+                    output_path=None if preview else output_path,
+                    obsidian_path=None if preview else published["obsidian_path"],
+                    updated_fields=updated_fields,
+                )
+            )
+            logger.info(
+                "Processed %d/%d: %s -> %s",
+                index,
+                total_to_process,
+                row["filename"],
+                "preview" if preview else (published["output_path"].name if published["output_path"] else output_path.name),
+            )
+        except Exception as exc:
+            failed_rows.append(
+                {
+                    "row": row,
+                    "error": str(exc),
+                    "existing": existing,
+                    "need_tags": need_tags,
+                    "need_purpose": need_purpose,
+                }
+            )
+            logger.warning("Failed %d/%d: %s (%s)", index, total_to_process, row["filename"], exc)
 
     if failed_rows and not preview:
         logger.info("Retrying %d failed rows with fallback labeling...", len(failed_rows))
-        for row, first_error in failed_rows:
+        for item in failed_rows:
+            row = item["row"]
+            first_error = item["error"]
             try:
-                decision = label_record_fallback(cfg, row, taxonomy)
+                decision = _classify_layers(
+                    cfg,
+                    row,
+                    taxonomy,
+                    item["existing"],
+                    need_tags=item["need_tags"],
+                    need_purpose=item["need_purpose"],
+                    use_tag_fallback=True,
+                )
             except Exception as exc:
                 logger.error(
                     "Fallback failed for %s after initial failure (%s): %s",
@@ -445,6 +446,8 @@ def run_pipeline(
                         "source_file": row["filename"],
                         "output_file": None,
                         "obsidian_output_file": None,
+                        "kind": CHAT_KIND,
+                        "purpose": [],
                         "tags": [],
                         "confidence": 0.0,
                         "reason": f"Initial: {first_error}; fallback: {exc}",
@@ -455,15 +458,19 @@ def run_pipeline(
             published = publish_record(cfg, row, decision)
             output_path = published["output_path"] or (cfg.final_dir / row["filename"])
             results.append(
-                {
-                    "status": "fallback",
-                    "source_file": row["filename"],
-                    "output_file": str(output_path.relative_to(cfg.project_root)),
-                    "obsidian_output_file": str(published["obsidian_path"]) if published["obsidian_path"] else None,
-                    "tags": decision["tags"],
-                    "confidence": decision["confidence"],
-                    "reason": f"fallback after initial failure: {first_error}",
-                }
+                _result_row(
+                    cfg,
+                    row,
+                    decision,
+                    status="fallback",
+                    output_path=output_path,
+                    obsidian_path=published["obsidian_path"],
+                    updated_fields=[
+                        field
+                        for field, needed in (("tags", item["need_tags"]), ("purpose", item["need_purpose"]))
+                        if needed
+                    ],
+                )
             )
             logger.info(
                 "Fallback processed: %s -> %s",
@@ -472,10 +479,44 @@ def run_pipeline(
             )
 
     if failed_rows:
-        failed_list = [f"{row['filename']}: {row['frontmatter'].get('generated_title', row['frontmatter'].get('original_title', row['filename']))}" for row, _ in failed_rows]
+        failed_list = [
+            f"{item['row']['filename']}: {item['row']['frontmatter'].get('generated_title', item['row']['frontmatter'].get('original_title', item['row']['filename']))}"
+            for item in failed_rows
+        ]
         logger.info("Failed rows after Stage 3 initial pass: %s", failed_list)
 
     return results
+
+
+def _classify_layers(
+    cfg: LabelConfig,
+    row: dict[str, Any],
+    taxonomy: dict[str, Any],
+    existing: dict[str, Any] | None,
+    *,
+    need_tags: bool,
+    need_purpose: bool,
+    use_tag_fallback: bool = False,
+) -> dict[str, Any]:
+    if need_tags:
+        tag_decision = label_record_fallback(cfg, row, taxonomy) if use_tag_fallback else label_record(cfg, row, taxonomy)
+    else:
+        tag_decision = {
+            "tags": existing["tags"] if existing else [],
+            "confidence": _as_confidence(existing.get("classification_confidence") if existing else 0.0),
+            "reason": str(existing.get("classification_reason", "") if existing else ""),
+        }
+
+    if need_purpose:
+        purpose_decision = classify_purpose(cfg, row)
+    else:
+        purpose_decision = {
+            "purpose": existing["purpose"] if existing else [DEFAULT_PURPOSE],
+            "purpose_confidence": _as_confidence(existing.get("purpose_confidence") if existing else 0.0),
+            "purpose_reason": str(existing.get("purpose_reason", "") if existing else ""),
+        }
+
+    return {**tag_decision, **purpose_decision}
 
 
 def _needed_updates(

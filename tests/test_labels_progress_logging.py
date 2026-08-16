@@ -34,6 +34,9 @@ class LabelPipelineProgressLoggingTests(unittest.TestCase):
             with patch("mindforge_core.labels.pipeline.provider_preflight_check"), patch(
                 "mindforge_core.labels.pipeline.load_taxonomy_tags", return_value=taxonomy
             ), patch("mindforge_core.labels.pipeline.label_record", return_value={"tags": ["tag1"], "confidence": 1.0, "reason": "ok"}), patch(
+                "mindforge_core.labels.pipeline.classify_purpose",
+                return_value={"purpose": ["lookup"], "purpose_confidence": 1.0, "purpose_reason": "ok"},
+            ), patch(
                 "mindforge_core.labels.pipeline.publish_record", return_value={"output_path": final_dir / "sample.md", "obsidian_path": None}
             ):
                 with self.assertLogs("mindforge_core.labels.pipeline", level="INFO") as captured:
